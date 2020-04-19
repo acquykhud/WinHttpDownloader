@@ -3,6 +3,11 @@
 #define CONFIG_FILENAME L"Config"
 #define INFO_FILENAME L"Info"
 #define WINHTTPDOWNLOADER_FILENAME L"WinHttpDownloader"
+#define MAKE_RANGE_HEADER(start, end) std::wstring(L"Range: bytes=") + \
+								std::to_wstring(start) + \
+								L"-" + \
+								std::to_wstring(end) + \
+								L"\r\n";
 
 DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& sFullPath, DWORD nThread, DWORD nConn)
 {
@@ -59,25 +64,31 @@ void DownloadManager::start()
 	{
 		Utils::info(L"[+] Not support resuming -> use 1 connection\n");
 		// TODO: download using 1 thread,  1 connection
+		writeConfig();
+		startSinglethreadedDownloadMode();
 	}
 	else if (m_conFig.bReady == FALSE)
 	{
 		Utils::info(L"[+] Something is wrong, please check --out arg\n");
+		// return;
 	}
 	else if (m_conFig.bResume == FALSE)
 	{
 		Utils::info(L"[+] Start downloading new file\n");
-		writeConfig();
-		startDownloading();
+		writeConfig(); // First time download this file -> write config
+		startMultithreadedDownloadMode();
 	}
 	else // m_conFig.bResume == TRUE
 	{
 		Utils::info(L"[+] Resuming\n");
-		startDownloading();
+		/*
+			Next time download the same file -> no need to write config.
+		*/
+		startMultithreadedDownloadMode();
 	}
 }
 
-void DownloadManager::startDownloading()
+void DownloadManager::startMultithreadedDownloadMode()
 {
 	/*
 		Start workers.
@@ -85,20 +96,42 @@ void DownloadManager::startDownloading()
 	*/
 	for (DWORD i = 0; i < m_conFig.dwThread; ++i)
 	{
-		int nThread = m_conFig.dwConn / m_conFig.dwThread;
+		int nConn = m_conFig.dwConn / m_conFig.dwThread;
 		if (i != m_conFig.dwThread - 1)
 			m_threads.push_back(
-				std::thread(&DownloadManager::downloadThread, this, nThread)
+				std::thread(&DownloadManager::downloadThread, this, nConn)
 			); // compiler generate: -> DownloadManager::download(void* this_ptr, int conn);
 		else
 			m_threads.push_back(
-				std::thread(&DownloadManager::downloadThread, this, nThread + (m_conFig.dwConn % m_conFig.dwThread))
+				std::thread(&DownloadManager::downloadThread, this, nConn + (m_conFig.dwConn % m_conFig.dwThread))
 			); // compiler generate: -> DownloadManager::download(void* this_ptr, int conn);
 	}
 	for (DWORD i = 0; i < m_conFig.dwThread; ++i)
 	{
 		m_threads[i].join();
 	}
+}
+
+void DownloadManager::startSinglethreadedDownloadMode()
+{
+	/*
+		Start only one worker.
+		Don't need to make range header.
+	*/
+	AsynchronousWinHttp worker;
+	HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(0)).c_str()
+		, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Can't create file\n");
+		return;
+	}
+	worker.setCtx((void*)hFile);
+	worker.setReadFunc(&DownloadManager::saveFile);
+	worker.init();
+	worker.get(m_conFig.sUrl.c_str(), L"");
+	worker.wait();
+	CloseHandle(hFile);
 }
 
 void DownloadManager::merge()
@@ -190,7 +223,7 @@ clean:
 
 void DownloadManager::downloadThread(int conn)
 {
-	Utils::info(L"[+] Conn = %d\n", conn);
+	// Utils::info(L"[+] Conn = %d\n", conn);
 	std::vector<AsynchronousWinHttp*> workers;
 	std::vector<HANDLE> files;
 	for (int i = 0; i < conn; ++i)
@@ -201,11 +234,7 @@ void DownloadManager::downloadThread(int conn)
 		Range range = this->m_pSegmentFactory->getNextSegment();
 		if (range.ord == MAXDWORD64) // ----------------->  this segment is not valid
 			continue;
-		std::wstring header = L"Range: bytes=";
-		header += std::to_wstring(range.start);
-		header += L"-";
-		header += std::to_wstring(range.end);
-		header += L"\r\n";
+		std::wstring header = MAKE_RANGE_HEADER(range.start, range.end);
 		HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 			,GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		AsynchronousWinHttp* worker = new AsynchronousWinHttp;
@@ -219,7 +248,7 @@ void DownloadManager::downloadThread(int conn)
 
 	if (!workers.empty())
 	{
-		while (m_pSegmentFactory->isDataAvail())
+		while (m_pSegmentFactory->isDataAvail()) /* while data is available, keep looping */
 		{
 			/*
 				Check for free connection.
@@ -234,11 +263,7 @@ void DownloadManager::downloadThread(int conn)
 					Range range = this->m_pSegmentFactory->getNextSegment();
 					if (range.ord == MAXDWORD64) // ----------------->  this segment is not valid
 						continue;
-					std::wstring header = L"Range: bytes=";
-					header += std::to_wstring(range.start);
-					header += L"-";
-					header += std::to_wstring(range.end);
-					header += L"\r\n";
+					std::wstring header = MAKE_RANGE_HEADER(range.start, range.end);
 					HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 						, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 					AsynchronousWinHttp* worker = new AsynchronousWinHttp;
@@ -282,7 +307,7 @@ void DownloadManager::updateConfig()
 	std::wstring sTmp = m_conFig.sFullPath + m_conFig.sUrl;
 	std::string sTmpEncoded = Utils::utf8_encode(sTmp);
 	m_conFig.sSHA256 = Utils::sha256_hexdigest((LPCBYTE)sTmpEncoded.c_str(), sTmpEncoded.length());
-	Utils::info(L"[+] %s:%s\n", sTmp.c_str(), m_conFig.sSHA256.c_str());
+	Utils::info(L"[+] Unique hash value: \"%s\"\n", m_conFig.sSHA256.c_str());
 
 	m_conFig.sDirPath = Utils::getTempPath() + WINHTTPDOWNLOADER_FILENAME + L'\\' + m_conFig.sSHA256 + L'\\';
 	
@@ -290,7 +315,7 @@ void DownloadManager::updateConfig()
 	CreateDirectoryW(sPath.c_str(), NULL); // Don't care
 	sPath = m_conFig.sDirPath;
 
-	Utils::info(L"[+] %s:%d\n", sPath.c_str(), sPath.length());
+	// Utils::info(L"[+] %s:%d\n", sPath.c_str(), sPath.length());
 	m_conFig.bResume = FALSE;
 	if (!CreateDirectoryW(sPath.c_str(), NULL))
 	{
@@ -351,7 +376,7 @@ DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize, const Config
 	if (qwFileSize != MAXDWORD64)
 		m_qwMaxSegmentCount = (qwFileSize + (qwSegmentSize - 1)) / qwSegmentSize;
 	else
-		m_qwMaxSegmentCount = MAXDWORD64;
+		m_qwMaxSegmentCount = 1; // ?
 	m_qwSegmentCount = 0uLL;
 }
 
@@ -397,7 +422,7 @@ void DownloadManager::SegmentFactory::repair()
 		Until now, we know that the server supports resuming.
 	*/
 	std::wstring sTmp = m_sDirPath + INFO_FILENAME;
-	m_hFile = CreateFileW(sTmp.c_str(), GENERIC_READ | GENERIC_WRITE, NULL, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	m_hFile = CreateFileW(sTmp.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (m_hFile == INVALID_HANDLE_VALUE)
 	{
 		Utils::info(L"[+] Can't repair, last error = %d\n", GetLastError());
@@ -503,7 +528,7 @@ void DownloadManager::FileMerger::start()
 	BYTE buffer[4096];
 	if (m_qwTotalSegment == 0uLL || m_qwTotalSegment == MAXDWORD64)
 	{
-		Utils::info(L"[+] SemgentCount invalid\n");
+		Utils::info(L"[+] Semgent count invalid\n");
 		return;
 	}
 	std::wstring sFullPath = m_sFullPath;

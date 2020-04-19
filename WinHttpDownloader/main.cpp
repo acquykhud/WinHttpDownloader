@@ -4,10 +4,10 @@ int main(int argc, char* argv[])
 {
 	// https://tb.rg-adguard.net/dl.php?go=349c795e
 	DownloadManager dm(
-		L"http://vietup.net/tai-tap-tin/secret-zip/220854",
+		L"https://medium.com/@suvanika/multipart-download-and-byte-ranges-b5d6b7577e95",
 		L"C:\\Users\\xikhud\\Desktop\\Out\\LastFile.zip",
 		3, // thread
-		9); // conn
+		6); // conn
 
 	DWORD64 qwSize = dm.getFileSize();
 

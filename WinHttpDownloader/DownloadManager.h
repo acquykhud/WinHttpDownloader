@@ -1,7 +1,7 @@
 #ifndef DOWNLOADMANAGER_H
 #define DOWNLOADMANAGER_H
 
-#define SEGMENT_SIZE (1048576uLL) // 1MB
+#define SEGMENT_SIZE (1048576uLL * 8uLL) // 1MB
 
 #include "AsynchronousWinHttp.h"
 #include <thread>
@@ -43,18 +43,19 @@ private:
 		void writeInfo(); // write Info to know where to continue downloading
 
 		void updateLastestSegment(DWORD64 idx); // update the lastest segment being requested to file
-		void closeFile(); // close file
+		
 
 	private:
 		std::mutex m_mutex;
-		DWORD64 m_qwSegmentCount;
-		DWORD64 m_qwMaxSegmentCount;
-		DWORD64 m_qwFileSize;
+		DWORD64 m_qwSegmentCount; // count variable
+		DWORD64 m_qwMaxSegmentCount; // File size / segment size (+1)
+		DWORD64 m_qwFileSize; // File size
 		HANDLE m_hFile; // File to save information
 		std::wstring m_sDirPath;
 		std::wstring m_sSHA256;
+		std::vector<Range> m_uncompletedSegments; // segments that is corrupt will be redownloaded
 
-		std::vector<Range> m_uncompletedSegments;
+		void closeFile(); // close file
 	};
 	class FileMerger
 	{
@@ -64,7 +65,7 @@ private:
 		~FileMerger() {}
 		void start();
 	private:
-		DWORD64 m_qwTotalSegment;
+		DWORD64 m_qwTotalSegment; // how many segments we need to merge ?
 		std::wstring m_sFullPath;
 		std::wstring m_sDirPath;
 		std::wstring m_sFileName;
@@ -91,11 +92,12 @@ private:
 	void updateConfig(); // read information save by "writeConfig"
 	void writeConfig(); // save information to determine whether we can resume
 
-	void startDownloading(); // start downloading
+	void startMultithreadedDownloadMode(); // start downloading
+	void startSinglethreadedDownloadMode(); 
 	void cleanTmpFiles(); // call this in destructor, remember to close all handles
 
 protected:
-	static void __stdcall saveFile(void* lpCtx, LPBYTE lpData, DWORD nCount);
+	static void __stdcall saveFile(void* lpCtx, LPBYTE lpData, DWORD nCount); // call back process data.
 };
 
 #endif

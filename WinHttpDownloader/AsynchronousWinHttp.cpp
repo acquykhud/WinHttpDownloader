@@ -60,7 +60,7 @@ void AsynchronousWinHttp::close()
 		m_hSession = NULL;
 	}
 	m_bIsClosed = TRUE;
-	Utils::info(L"[+] close called\n");
+	// Utils::info(L"[+] close called\n");
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_con.notify_one();
 }
@@ -322,9 +322,9 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 	{
 		DWORD size = dwStatusInformationLength;
 		LPBYTE lpBuffer = (LPBYTE)lpvStatusInformation;
-		//Utils::info(L"[+] %u bytes had been read (%s)\n", size, lpCtx->m_sName.c_str());
 		lpCtx->m_qwByteReadCount += size;
-		lpCtx->update();
+
+		// lpCtx->update();
 		if (lpCtx->m_fnReadFunc != NULL && lpCtx->m_ctx != NULL)
 		{
 			lpCtx->m_fnReadFunc(lpCtx->m_ctx, lpBuffer, size);
@@ -338,8 +338,9 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 
 
 	case WINHTTP_CALLBACK_STATUS_REDIRECT:
-		// puts("[+] WINHTTP_CALLBACK_STATUS_REDIRECT");
-		// Don't know what to do
+		/*
+			I don't know what to do
+		*/
 		break;
 
 	case WINHTTP_CALLBACK_STATUS_REQUEST_ERROR:
