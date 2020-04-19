@@ -5,14 +5,19 @@ AsynchronousWinHttp::AsynchronousWinHttp()
 	m_qwByteReadCount = 0;
 	m_percent = 0.f;
 	m_bHeaderReady = FALSE;
-	m_internalBuffer = new BYTE[8192 + 2048]; // maximum of 8KB, I give it 2KB more, but it isn't necessary
+	m_lpInternalBuffer = new BYTE[8192 + 2048]; // WinHttpReadData read maximum of 8KB data (don't know why I give it 2KB more)
 	m_fnReadFunc = NULL;
 	m_ctx = NULL;
 }
 
 AsynchronousWinHttp::~AsynchronousWinHttp()
 {
-	close();
+	close(); // In case user forgets to close
+	if (m_lpInternalBuffer)
+	{
+		delete[] m_lpInternalBuffer;
+		m_lpInternalBuffer = NULL;
+	}
 }
 
 bool AsynchronousWinHttp::init()
@@ -27,11 +32,7 @@ void AsynchronousWinHttp::close()
 	{
 		return;
 	}
-	if (m_internalBuffer)
-	{
-		delete[] m_internalBuffer;
-		m_internalBuffer = NULL;
-	}
+
 	if (m_hRequest)
 	{
 		WinHttpSetStatusCallback(m_hRequest, NULL, NULL, NULL);
@@ -49,7 +50,7 @@ void AsynchronousWinHttp::close()
 		m_hSession = NULL;
 	}
 	m_bIsClosed = TRUE;
-	wprintf(L"[+] close called\n");
+	Utils::info(L"[+] close called\n");
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_con.notify_one();
 }
@@ -101,10 +102,13 @@ bool AsynchronousWinHttp::get(LPCWSTR szUrl, const std::wstring& sHeader)
 	return true;
 }
 
-bool AsynchronousWinHttp::wait(DWORD dwTimeOut)
+bool AsynchronousWinHttp::wait()
 {
 	std::unique_lock<std::mutex> uLock(m_mutex); // lock 
-	m_con.wait(uLock, [this] { return this->m_hRequest == NULL; });
+	m_con.wait(uLock, [this] 
+	{
+		return this->m_hRequest == NULL; // when we closed the connection, this will be null
+	});
 	return true;
 }
 
@@ -176,9 +180,8 @@ bool AsynchronousWinHttp::isDataAvail()
 
 void AsynchronousWinHttp::update()
 {
-	if (m_qwRemoteFileSize == 0) // percentage update: beware divide by zero
+	if (m_qwRemoteFileSize == 0) // percentage update: warning: divide by zero
 	{
-		wprintf(L"[+] Zero\n");
 		return;
 	}
 	static auto lastTimeStamp = std::chrono::high_resolution_clock::now();
@@ -190,7 +193,7 @@ void AsynchronousWinHttp::update()
 	{
 		lastTimeStamp = timeStamp;
 		float speed = (float)(byteReadCount - lastByteReadCount) / 1000;
-		wprintf(L"[+] %.2fkb/s\n", speed);
+		Utils::info(L"[+] %.2fkb/s\n", speed);
 		lastByteReadCount = byteReadCount;
 	}
 }
@@ -199,7 +202,7 @@ void AsynchronousWinHttp::readBufferedData(DWORD size)
 {
 	if (!size)
 		return;
-	WinHttpReadData(m_hRequest, m_internalBuffer, size, NULL);
+	WinHttpReadData(m_hRequest, m_lpInternalBuffer, size, NULL);
 }
 
 BOOL AsynchronousWinHttp::getRemoteSize(DWORD64* lpDwSizeOut) const
@@ -229,7 +232,7 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 	switch (dwInternetStatus)
 	{
 	case WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE:
-		// wprintf(L"[+] %s %s\n", lpCtx->m_sName.c_str(), L"WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE");
+		// Utils::info(L"[+] %s %s\n", lpCtx->m_sName.c_str(), L"WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE");
 		if (!WinHttpReceiveResponse(lpCtx->m_hRequest, NULL)) // Generate HEADERS_AVAILABLE
 		{
 			// TODO: cleanup
@@ -244,9 +247,9 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 		else
 		{
 			// Got headers now, print to check !
-			// wprintf(L"[+] Header: \"\"\"\n%s\"\"\"\n", lpCtx->m_sHeader.c_str());
-			// wprintf(L"[+] RemoteSize: %lld\n", lpCtx->m_qwRemoteFileSize);
-			// wprintf(L"[+] Resumable: %s\n", lpCtx->m_bSupportResuming ? L"TRUE" : L"FALSE");
+			// Utils::info(L"[+] Header: \"\"\"\n%s\"\"\"\n", lpCtx->m_sHeader.c_str());
+			// Utils::info(L"[+] RemoteSize: %lld\n", lpCtx->m_qwRemoteFileSize);
+			// Utils::info(L"[+] Resumable: %s\n", lpCtx->m_bSupportResuming ? L"TRUE" : L"FALSE");
 		}
 		if (!lpCtx->isDataAvail())					   // Generate DATA_AVAILABLE
 		{
@@ -258,12 +261,12 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 	case WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE:
 	{
 		DWORD size = *((LPDWORD)lpvStatusInformation);
-		//wprintf(L"[+] %u bytes available\n", size);
+		//Utils::info(L"[+] %u bytes available\n", size);
 		if (size == 0)
 		{
 			// No more data to read, clean up now
-			wprintf(L"[+] No more data, bye (%s)\n", lpCtx->m_sName.c_str());
-			wprintf(L"[+] Total read: %lld\n", lpCtx->m_qwByteReadCount);
+			Utils::info(L"[+] No more data, bye (%s)\n", lpCtx->m_sName.c_str());
+			Utils::info(L"[+] Total read: %lld\n", lpCtx->m_qwByteReadCount);
 			lpCtx->close(); // 
 		}
 		else
@@ -277,7 +280,7 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 	{
 		DWORD size = dwStatusInformationLength;
 		LPBYTE lpBuffer = (LPBYTE)lpvStatusInformation;
-		//wprintf(L"[+] %u bytes had been read (%s)\n", size, lpCtx->m_sName.c_str());
+		//Utils::info(L"[+] %u bytes had been read (%s)\n", size, lpCtx->m_sName.c_str());
 		lpCtx->m_qwByteReadCount += size;
 		lpCtx->update();
 		if (lpCtx->m_fnReadFunc != NULL && lpCtx->m_ctx != NULL)
@@ -299,8 +302,8 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 
 	case WINHTTP_CALLBACK_STATUS_REQUEST_ERROR:
 	{
-		wprintf(L"[+] WINHTTP_CALLBACK_STATUS_REQUEST_ERROR\n");
-		wprintf(L"[+] Error number: %d, error id: %d\n", pWAR->dwError, pWAR->dwResult);
+		Utils::info(L"[+] WINHTTP_CALLBACK_STATUS_REQUEST_ERROR\n");
+		Utils::info(L"[+] Error number: %d, error id: %d\n", pWAR->dwError, pWAR->dwResult);
 		lpCtx->close();
 		break;
 	}

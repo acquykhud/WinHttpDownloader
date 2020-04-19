@@ -1,24 +1,36 @@
 #include "DownloadManager.h"
 
-DownloadManager::DownloadManager(const std::wstring & url, DWORD nThread, DWORD nConn, BOOL resume)
+#define CONFIG_FILENAME L"Config"
+#define INFO_FILENAME L"Info"
+#define WINHTTPDOWNLOADER_FILENAME L"WinHttpDownloader"
+
+DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& sFullPath, DWORD nThread, DWORD nConn)
 {
-	m_conFig.sUrl = url; m_conFig.dwThread = nThread; m_conFig.dwConn = nConn; m_conFig.bResume = resume;
+	m_conFig.sUrl = url;
+	m_conFig.dwThread = nThread;
+	m_conFig.dwConn = nConn;
+	m_conFig.sFullPath = sFullPath;
+	this->updateConfig();
 	this->queryOptions();
-	if (m_qwRemoteFileSize == 0uLL)
+	m_pSegmentFactory = new SegmentFactory(m_qwRemoteFileSize, m_conFig.sDirPath, m_conFig.sSHA256);
+	if (m_conFig.bReady && m_conFig.bResume)
 	{
-		return;
+		m_pSegmentFactory->repair();
 	}
-	if (m_bSupportResuming == FALSE)
+	else if (m_conFig.bReady /*&& m_conFig.bResume == FALSE */)
 	{
-		// ?? use 1 thread
-		return;
+		m_pSegmentFactory->writeInfo();
 	}
-	m_pSegmentFactory = new SegmentFactory(m_qwRemoteFileSize);
 }
 
 DownloadManager::~DownloadManager()
 {
-	delete m_pSegmentFactory;
+	if (m_pSegmentFactory)
+	{
+		delete m_pSegmentFactory;
+		m_pSegmentFactory = NULL;
+	}
+	cleanTmpFiles();
 }
 
 DWORD64 DownloadManager::getFileSize() const
@@ -33,16 +45,65 @@ BOOL DownloadManager::supportResuming() const
 
 void DownloadManager::start()
 {
+	if (m_qwRemoteFileSize == 0 || m_qwRemoteFileSize == MAXDWORD64 || m_bSupportResuming == FALSE)
+	{
+		Utils::info(L"[+] Not support resuming -> use 1 connection\n");
+		// TODO: download using 1 thread,  1 connection
+	}
+	else if (m_conFig.bReady == FALSE)
+	{
+		Utils::info(L"[+] Something is wrong, please check --out arg\n");
+		return;
+	}
+	else if (m_conFig.bResume == FALSE)
+	{
+		Utils::info(L"[+] Start downloading new file\n");
+		writeConfig();
+		startDownloading();
+	}
+	else // m_conFig.bResume == TRUE
+	{
+		Utils::info(L"[+] Resuming\n");
+		startDownloading();
+	}
+}
+
+void DownloadManager::startDownloading()
+{
 	for (DWORD i = 0; i < m_conFig.dwThread; ++i)
 	{
-		m_threads.push_back(
-			std::thread(&DownloadManager::downloadThread, this, m_conFig.dwConn)
-		); // compiler generate: -> DownloadManager::download(void* this_ptr, int conn);
+		int nThread = m_conFig.dwConn / m_conFig.dwThread;
+		if (i != m_conFig.dwThread - 1)
+			m_threads.push_back(
+				std::thread(&DownloadManager::downloadThread, this, nThread)
+			); // compiler generate: -> DownloadManager::download(void* this_ptr, int conn);
+		else
+			m_threads.push_back(
+				std::thread(&DownloadManager::downloadThread, this, nThread + (m_conFig.dwConn % m_conFig.dwThread))
+			); // compiler generate: -> DownloadManager::download(void* this_ptr, int conn);
 	}
 	for (DWORD i = 0; i < m_conFig.dwThread; ++i)
 	{
 		m_threads[i].join();
 	}
+}
+
+void DownloadManager::merge()
+{
+	//FileMerger fm(m_conFig.sFullPath, m_conFig.sDirPath, m_conFig.sFileName, m_pSegmentFactory->getMaxSegmentCount());
+	FileMerger fm(m_conFig, m_pSegmentFactory->getMaxSegmentCount());
+	fm.start();
+}
+
+void DownloadManager::cleanTmpFiles()
+{
+	DeleteFileW((m_conFig.sDirPath + CONFIG_FILENAME).c_str());
+	BOOL bSuccess = DeleteFileW((m_conFig.sDirPath + INFO_FILENAME).c_str());
+	if (!bSuccess)
+	{
+		Utils::info(L"[+] Handle closed but I can't delete the file, WTF, last error = %d\n", GetLastError());
+	}
+	RemoveDirectoryW(m_conFig.sDirPath.c_str());
 }
 
 void DownloadManager::queryOptions()
@@ -89,7 +150,7 @@ void DownloadManager::queryOptions()
 	}
 	dwBufLen = sizeof(m_qwRemoteFileSize);
 	if (!WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER64, NULL, &m_qwRemoteFileSize, &dwBufLen, NULL))
-		m_qwRemoteFileSize = 0;
+		m_qwRemoteFileSize = MAXDWORD64;
 	dwBufLen = sizeof(szBytes);
 	if (!WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_ACCEPT_RANGES, NULL, szBytes, &dwBufLen, NULL))
 		m_bSupportResuming = FALSE;
@@ -109,12 +170,13 @@ clean:
 
 void DownloadManager::downloadThread(int conn)
 {
+	Utils::info(L"[+] Conn = %d\n", conn);
 	std::vector<AsynchronousWinHttp*> workers;
 	std::vector<HANDLE> files;
 	for (int i = 0; i < conn; ++i)
 	{
 		/*
-			Init connections
+			Init connections once.
 		*/
 		Range range = this->m_pSegmentFactory->getNextSegment();
 		if (range.ord == MAXDWORD64) // this segment is not valid
@@ -124,7 +186,7 @@ void DownloadManager::downloadThread(int conn)
 		header += L"-";
 		header += std::to_wstring(range.end);
 		header += L"\r\n";
-		HANDLE hFile = CreateFileW((std::wstring(L"C:\\Users\\xikhud\\Desktop\\Out\\") + std::to_wstring(range.ord)).c_str()
+		HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 			,GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		AsynchronousWinHttp* worker = new AsynchronousWinHttp;
 		workers.push_back(worker);
@@ -157,7 +219,7 @@ void DownloadManager::downloadThread(int conn)
 					header += L"-";
 					header += std::to_wstring(range.end);
 					header += L"\r\n";
-					HANDLE hFile = CreateFileW((std::wstring(L"C:\\Users\\xikhud\\Desktop\\Out\\") + std::to_wstring(range.ord)).c_str()
+					HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 						, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 					AsynchronousWinHttp* worker = new AsynchronousWinHttp;
 					workers[i] = worker;
@@ -182,27 +244,112 @@ void DownloadManager::downloadThread(int conn)
 	}
 }
 
+void DownloadManager::updateConfig()
+{
+	/*
+		This function, separate FullPath into filename and directory. 
+		Calculate SHA256, and determine what to do.
+	*/
+	m_conFig.bReady = FALSE;
+	auto p = m_conFig.sFullPath.rfind(L'\\');
+	if (p == std::wstring::npos)
+	{
+		Utils::info(L"[+] Wrong path\n");
+		return;
+	}
+	m_conFig.sFileName = m_conFig.sFullPath.substr(p + 1); // p+1 -> end
+
+	std::wstring sTmp = m_conFig.sFullPath + m_conFig.sUrl;
+	std::string sTmpEncoded = Utils::utf8_encode(sTmp);
+	m_conFig.sSHA256 = Utils::sha256_hexdigest((LPCBYTE)sTmpEncoded.c_str(), sTmpEncoded.length());
+	Utils::info(L"[+] %s:%s\n", sTmp.c_str(), m_conFig.sSHA256.c_str());
+
+	m_conFig.sDirPath = Utils::getTempPath() + WINHTTPDOWNLOADER_FILENAME + L'\\' + m_conFig.sSHA256 + L'\\';
+	
+	std::wstring sPath = Utils::getTempPath() + WINHTTPDOWNLOADER_FILENAME + L'\\';
+	CreateDirectoryW(sPath.c_str(), NULL); // Don't care
+	sPath = m_conFig.sDirPath;
+
+	Utils::info(L"[+] %s:%d\n", sPath.c_str(), sPath.length());
+	m_conFig.bResume = FALSE;
+	if (!CreateDirectoryW(sPath.c_str(), NULL))
+	{
+		if (GetLastError() == ERROR_ALREADY_EXISTS)
+		{
+			BOOL bResumeable = FALSE;
+			std::wstring sTmp = m_conFig.sDirPath + CONFIG_FILENAME;
+			HANDLE hFile = CreateFileW(sTmp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (hFile != INVALID_HANDLE_VALUE)
+			{
+				DWORD nr;
+				ReadFile(hFile, &bResumeable, sizeof(bResumeable), &nr, NULL);
+				CloseHandle(hFile);
+			}
+			m_conFig.bResume = bResumeable;
+		}
+	}
+	Utils::info(L"[+] Resuming: %s\n", m_conFig.bResume ? L"TRUE" : L"FALSE");
+	m_conFig.bReady = TRUE; 
+}
+
+void DownloadManager::writeConfig()
+{
+	std::wstring sTmp = m_conFig.sDirPath + CONFIG_FILENAME;
+	HANDLE hFile = CreateFileW(sTmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Can't write config, last error = \n", GetLastError());
+		return;
+	}
+	BOOL bResumeable = m_bSupportResuming;
+	DWORD nw;
+	WriteFile(hFile, &bResumeable, sizeof(bResumeable), &nw, NULL);
+	CloseHandle(hFile);
+}
+
 void __stdcall DownloadManager::saveFile(void * lpCtx, LPBYTE lpData, DWORD nCount)
 {
 	DWORD w = 0;
 	WriteFile((HANDLE)lpCtx, lpData, nCount, &w, NULL);
 }
 
-
-DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize)
+DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize, const std::wstring& sDirPath, const std::wstring& sSHA256)
+	: m_qwFileSize(qwFileSize), m_sDirPath(sDirPath), m_sSHA256(sSHA256)
 {
-	if (qwFileSize)
+	if (qwFileSize != MAXDWORD64)
 		m_qwMaxSegmentCount = (qwFileSize + (qwSegmentSize - 1)) / qwSegmentSize;
 	else
 		m_qwMaxSegmentCount = MAXDWORD64;
 	m_qwSegmentCount = 0uLL;
+}
+
+DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize, const Config & config)
+{
 	m_qwFileSize = qwFileSize;
+	m_sDirPath = config.sDirPath;
+	m_sSHA256 = config.sSHA256;
+	if (qwFileSize != MAXDWORD64)
+		m_qwMaxSegmentCount = (qwFileSize + (qwSegmentSize - 1)) / qwSegmentSize;
+	else
+		m_qwMaxSegmentCount = MAXDWORD64;
+	m_qwSegmentCount = 0uLL;
+}
+
+DownloadManager::SegmentFactory::~SegmentFactory()
+{
+	closeFile();
 }
 
 Range DownloadManager::SegmentFactory::getNextSegment()
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	Range range;
+	if (!m_uncompletedSegments.empty())
+	{
+		range = m_uncompletedSegments.back();
+		m_uncompletedSegments.pop_back();
+		return range;
+	}
 	range.start = m_qwSegmentCount * qwSegmentSize;
 	range.ord = m_qwSegmentCount;
 	if (m_qwSegmentCount != m_qwMaxSegmentCount - 1)
@@ -210,7 +357,152 @@ Range DownloadManager::SegmentFactory::getNextSegment()
 	else
 		range.end = range.start + (m_qwFileSize % qwSegmentSize) - 1;
 	m_qwSegmentCount += 1uLL;
+	updateLastestSegment(m_qwSegmentCount);
 	if (m_qwSegmentCount > m_qwMaxSegmentCount)
 		range.ord = MAXDWORD64;
+
 	return range;
+}
+
+void DownloadManager::SegmentFactory::repair()
+{
+	/*
+		Until now, we know that the server supports resuming.
+	*/
+	std::wstring sTmp = m_sDirPath + INFO_FILENAME;
+	m_hFile = CreateFileW(sTmp.c_str(), GENERIC_READ | GENERIC_WRITE, NULL, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (m_hFile == INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Can't repair, last error = %d\n", GetLastError());
+		return;
+	}
+	DWORD nr;
+	BOOL bSuccess;
+	bSuccess = ReadFile(m_hFile, &m_qwSegmentCount, sizeof(m_qwSegmentCount), &nr, NULL);
+	bSuccess = ReadFile(m_hFile, &m_qwMaxSegmentCount, sizeof(m_qwMaxSegmentCount), &nr, NULL);
+	bSuccess = ReadFile(m_hFile, &m_qwFileSize, sizeof(m_qwFileSize), &nr, NULL);
+
+	/*
+		Check for uncompleted segments
+	*/
+	for (DWORD64 i = 0uLL; i < m_qwSegmentCount; ++i)
+	{
+		sTmp = m_sDirPath + std::to_wstring(i);
+		HANDLE hFile = CreateFileW(sTmp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFile == INVALID_HANDLE_VALUE) // Segment is not there ? -> Redownload
+		{
+			goto save;
+		}
+		else
+		{
+			DWORD dwFileSize = GetFileSize(hFile, NULL);
+			if (dwFileSize != (DWORD)qwSegmentSize)
+				goto save; // Segment doesn't have full size -> Redownload
+			else
+			{
+				CloseHandle(hFile);
+				continue;
+			}
+		}
+	save:
+		Range range;
+		range.start = i * qwSegmentSize;
+		range.ord = i;
+		if (i != m_qwMaxSegmentCount - 1)
+			range.end = range.start + (qwSegmentSize - 1);
+		else
+			range.end = range.start + (m_qwFileSize % qwSegmentSize) - 1;
+		m_uncompletedSegments.push_back(range);
+		if (hFile)
+			CloseHandle(hFile);
+	}
+}
+
+void DownloadManager::SegmentFactory::writeInfo()
+{
+	std::wstring sTmp = m_sDirPath + INFO_FILENAME;
+	m_hFile = CreateFileW(sTmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (m_hFile == INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Can't create info, last error = %d\n", GetLastError());
+		return;
+	}
+	// Write info
+	// struct {
+	//		DWORD64 m_qwSegmentCount;
+	//		DWORD64 m_qwMaxSegmentCount;
+	//		DWORD64 m_qwFileSize;
+	// };
+	DWORD nw;
+	WriteFile(m_hFile, &m_qwSegmentCount, sizeof(m_qwSegmentCount), &nw, NULL);
+	WriteFile(m_hFile, &m_qwMaxSegmentCount, sizeof(m_qwMaxSegmentCount), &nw, NULL);
+	WriteFile(m_hFile, &m_qwFileSize, sizeof(m_qwFileSize), &nw, NULL);
+}
+
+void DownloadManager::SegmentFactory::updateLastestSegment(DWORD64 idx)
+{
+	if (m_hFile != INVALID_HANDLE_VALUE)
+	{
+		SetFilePointer(m_hFile, 0, NULL, FILE_BEGIN);
+		DWORD nw;
+		WriteFile(m_hFile, &idx, sizeof(idx), &nw, NULL);
+	}
+}
+
+void DownloadManager::SegmentFactory::closeFile()
+{
+	if (m_hFile != INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Closed\n");
+		SetFilePointer(m_hFile, 0, NULL, FILE_END);
+		BOOL bSuccess = CloseHandle(m_hFile);
+		if (!bSuccess)
+		{
+			Utils::info(L"[+] WHAT the fuck, last error = %d\n", GetLastError());
+		}
+		m_hFile = NULL;
+	}
+}
+
+void DownloadManager::FileMerger::start()
+{
+	BYTE buffer[4096];
+	if (m_qwTotalSegment == 0uLL || m_qwTotalSegment == MAXDWORD64)
+	{
+		Utils::info(L"[+] SemgentCount invalid\n");
+		return;
+	}
+	std::wstring sFullPath = m_sFullPath;
+	HANDLE hFile = CreateFileW(sFullPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+	{
+		Utils::info(L"[+] Can't create new file, last error = %d\n", GetLastError());
+		return;
+	}
+	for (DWORD64 i = 0uLL; i < m_qwTotalSegment; ++i)
+	{
+		std::wstring sTmp = m_sDirPath + std::to_wstring(i);
+		HANDLE hTmpFile = CreateFileW(sTmp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hTmpFile == INVALID_HANDLE_VALUE)
+		{
+			Utils::info(L"[+] Missing %d, exiting ..., last error = %d\n", i, GetLastError());
+			break;
+		}
+		DWORD dwFileSizeLow, dwFileSizeHigh;
+		DWORD64 dwFileSize = 0uLL;
+		dwFileSizeLow = GetFileSize(hTmpFile, &dwFileSizeHigh);
+		dwFileSize = (DWORD64)dwFileSizeLow | (((DWORD64)dwFileSizeHigh) << 32);
+		Utils::info(L"[+] File %lld, size = %lld\n", i, dwFileSize);
+		DWORD64 n = 0;
+		while (n < dwFileSize)
+		{
+			DWORD nr, nw;
+			ReadFile(hTmpFile, buffer, sizeof(buffer), &nr, NULL);
+			n += nr;
+			WriteFile(hFile, buffer, nr, &nw, NULL);
+		}
+		CloseHandle(hTmpFile);
+		DeleteFileW(sTmp.c_str());
+	}
+	CloseHandle(hFile);
 }

@@ -124,10 +124,14 @@
     <ClCompile Include="AsynchronousWinHttp.cpp" />
     <ClCompile Include="DownloadManager.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Sha256.cpp" />
+    <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AsynchronousWinHttp.h" />
     <ClInclude Include="DownloadManager.h" />
+    <ClInclude Include="Sha256.h" />
+    <ClInclude Include="Utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

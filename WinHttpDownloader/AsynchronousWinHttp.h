@@ -1,11 +1,11 @@
 #pragma once
 #include <Windows.h>
-#include <tchar.h>
 #include <winhttp.h>
 #include <stdio.h>
 #include <string>
 #include <mutex>
 #include <condition_variable>
+#include "Utils.h"
 #pragma comment(lib, "winhttp.lib")
 
 class AsynchronousWinHttp
@@ -17,7 +17,7 @@ public:
 	bool init();
 	void close();
 	bool get(LPCWSTR szUrl, const std::wstring& sHeader);
-	bool wait(DWORD dwTimeOut = INFINITE);
+	bool wait();
 
 	bool isDataAvail();
 
@@ -30,9 +30,9 @@ public:
 	void setReadFunc(void(__stdcall *fn)(void* ctx, LPBYTE, DWORD)) { this->m_fnReadFunc = fn; }
 	void setCtx(void* ctx) { this->m_ctx = ctx; }
 
-	std::wstring getRawHeader() const;
-	BOOL getRemoteSize(DWORD64* lpQwSizeOut) const;
-	BOOL checkIfSupportResuming(LPBOOL lpBOut) const;
+	std::wstring getRawHeader() const;					   // for debugging only
+	BOOL getRemoteSize(DWORD64* lpQwSizeOut) const;		   // for debugging only
+	BOOL checkIfSupportResuming(LPBOOL lpBOut) const;	   // for debugging only
 
 private:
 	HINTERNET m_hSession;
@@ -42,22 +42,22 @@ private:
 	void(__stdcall *m_fnReadFunc)(void* ctx, LPBYTE lpData, DWORD nCount);
 	void* m_ctx;
 
-	std::mutex m_mutex;
-	std::condition_variable m_con;
+	std::mutex m_mutex;			   // async, wait, ...
+	std::condition_variable m_con; // async, wait, ...
 
-	float m_percent;
+	float m_percent;			   // for updating progress ??
 
 	DWORD64 m_qwRemoteFileSize;	   // file size can be larger than 4GB 
 	DWORD64 m_qwByteReadCount;	   // file size can be larger than 4GB 
 
-	BOOL m_bSupportResuming;
-	BOOL m_bHeaderReady;
+	BOOL m_bSupportResuming;	   // support resuming is supported ? , don't use
+	BOOL m_bHeaderReady;		   // header is ready to be read, don't use
 	BOOL m_bIsClosed;              // is this connection closed ?
 
-	std::wstring m_sHeader;
-	std::wstring m_sName;
+	std::wstring m_sHeader;		   // header to be sent in GET request
+	std::wstring m_sName;		   // object name, for debugging
 
-	PBYTE m_internalBuffer;
+	PBYTE m_lpInternalBuffer;	   // store data from WinHttpReadData
 
 	bool getHeader(); 
 
