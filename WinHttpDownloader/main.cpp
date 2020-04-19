@@ -4,7 +4,7 @@ int main(int argc, char* argv[])
 {
 	// https://tb.rg-adguard.net/dl.php?go=349c795e
 	DownloadManager dm(
-		L"https://tb.rg-adguard.net/dl.php?go=349c795e",
+		L"http://flare-on.com/files/Flare-On6_Challenges.zip",
 		L"C:\\Users\\xikhud\\Desktop\\Out\\LastFile.zip",
 		3, // thread
 		6); // conn

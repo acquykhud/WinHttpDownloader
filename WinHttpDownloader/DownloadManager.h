@@ -1,9 +1,10 @@
 #ifndef DOWNLOADMANAGER_H
 #define DOWNLOADMANAGER_H
 
-#define SEGMENT_SIZE (1048576uLL * 8) // 1MB
+#define SEGMENT_SIZE (1048576uLL * 4uLL) // 1MB
 
 #include "AsynchronousWinHttp.h"
+#include "ProgressBar.h"
 #include <thread>
 #include <vector>
 struct Range
@@ -91,6 +92,7 @@ private:
 	BOOL m_bSupportResuming;
 	std::vector<std::thread> m_threads;
 	SegmentFactory* m_pSegmentFactory;
+	ProgressBar m_progressBar;
 
 	void queryOptions(); // get file size and check if resuming is support;
 	void downloadThread(int conn = 1); // thread function.

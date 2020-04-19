@@ -307,8 +307,8 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 		if (size == 0)
 		{
 			// No more data to read, clean up now
-			Utils::info(L"[+] No more data, bye (%s)\n", lpCtx->m_sName.c_str());
-			Utils::info(L"[+] Total read: %lld\n", lpCtx->m_qwByteReadCount);
+			//Utils::info(L"[+] No more data, bye (%s)\n", lpCtx->m_sName.c_str());
+			//Utils::info(L"[+] Total read: %lld\n", lpCtx->m_qwByteReadCount);
 			lpCtx->close(); // 
 		}
 		else
@@ -345,7 +345,7 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 
 	case WINHTTP_CALLBACK_STATUS_REQUEST_ERROR:
 	{
-		Utils::info(L"[+] WINHTTP_CALLBACK_STATUS_REQUEST_ERROR\n");
+		//Utils::info(L"[+] WINHTTP_CALLBACK_STATUS_REQUEST_ERROR\n");
 		Utils::info(L"[+] Error number: %d, error id: %d\n", pWAR->dwError, pWAR->dwResult);
 		lpCtx->close();
 		break;

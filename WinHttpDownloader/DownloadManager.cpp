@@ -30,6 +30,7 @@ DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& s
 	{
 		m_pSegmentFactory->writeInfo();
 	}
+	m_progressBar.setTotal(m_qwRemoteFileSize);
 }
 
 DownloadManager::~DownloadManager()
@@ -377,6 +378,7 @@ void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCou
 	if (!WriteFile(pCtx->hFile, lpData, nCount, &w, NULL))
 		Utils::info(L"[+] %d\n", GetLastError());
 	pDM->m_qwDownloadedSize += (DWORD64)nCount;
+	pDM->m_progressBar.update(pDM->m_qwDownloadedSize);
 	//Utils::info(L"[+] %lld\n", pDM->m_qwDownloadedSize);
 }
 
