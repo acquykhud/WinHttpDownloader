@@ -4,7 +4,7 @@ int main(int argc, char* argv[])
 {
 	// https://tb.rg-adguard.net/dl.php?go=349c795e
 	DownloadManager dm(
-		L"https://medium.com/@suvanika/multipart-download-and-byte-ranges-b5d6b7577e95",
+		L"https://tb.rg-adguard.net/dl.php?go=349c795e",
 		L"C:\\Users\\xikhud\\Desktop\\Out\\LastFile.zip",
 		3, // thread
 		6); // conn

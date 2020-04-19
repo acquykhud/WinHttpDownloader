@@ -1,7 +1,7 @@
 #ifndef DOWNLOADMANAGER_H
 #define DOWNLOADMANAGER_H
 
-#define SEGMENT_SIZE (1048576uLL * 8uLL) // 1MB
+#define SEGMENT_SIZE (1048576uLL * 8) // 1MB
 
 #include "AsynchronousWinHttp.h"
 #include <thread>
@@ -39,7 +39,7 @@ private:
 		bool isDataAvail() const { return m_uncompletedSegments.empty() == false || m_qwSegmentCount < m_qwMaxSegmentCount; }
 		DWORD64 getMaxSegmentCount() const { return m_qwMaxSegmentCount; }
 
-		void repair();    // read info written by "writeInfo"
+		DWORD64 repair();    // read info written by "writeInfo"
 		void writeInfo(); // write Info to know where to continue downloading
 
 		void updateLastestSegment(DWORD64 idx); // update the lastest segment being requested to file
@@ -70,6 +70,11 @@ private:
 		std::wstring m_sDirPath;
 		std::wstring m_sFileName;
 	};
+	struct DownloadManagerCallbackContext
+	{
+		HANDLE hFile; // File to write
+		void* this_ptr; // ptr to DownloadManager object
+	};
 public:
 	DownloadManager(const std::wstring& sUrl, const std::wstring& sFullPath, DWORD nThread = 1, DWORD nConn = 1);
 	~DownloadManager();
@@ -82,6 +87,7 @@ public:
 private:
 	Config m_conFig;
 	DWORD64 m_qwRemoteFileSize;
+	DWORD64 m_qwDownloadedSize; // how much we have downloaded
 	BOOL m_bSupportResuming;
 	std::vector<std::thread> m_threads;
 	SegmentFactory* m_pSegmentFactory;
@@ -97,7 +103,7 @@ private:
 	void cleanTmpFiles(); // call this in destructor, remember to close all handles
 
 protected:
-	static void __stdcall saveFile(void* lpCtx, LPBYTE lpData, DWORD nCount); // call back process data.
+	static void __stdcall CallBack(void* lpCtx, LPBYTE lpData, DWORD nCount); // call back process data.
 };
 
 #endif

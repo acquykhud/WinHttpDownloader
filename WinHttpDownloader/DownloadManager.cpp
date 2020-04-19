@@ -18,12 +18,13 @@ DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& s
 	m_conFig.dwThread = nThread;
 	m_conFig.dwConn = nConn;
 	m_conFig.sFullPath = sFullPath;
+	m_qwDownloadedSize = 0uLL;
 	this->updateConfig();
 	this->queryOptions();
 	m_pSegmentFactory = new SegmentFactory(m_qwRemoteFileSize, m_conFig);
 	if (m_conFig.bReady && m_conFig.bResume)
 	{
-		m_pSegmentFactory->repair();
+		m_qwDownloadedSize = m_pSegmentFactory->repair();
 	}
 	else if (m_conFig.bReady /*&& m_conFig.bResume == FALSE */)
 	{
@@ -126,8 +127,11 @@ void DownloadManager::startSinglethreadedDownloadMode()
 		Utils::info(L"[+] Can't create file\n");
 		return;
 	}
-	worker.setCtx((void*)hFile);
-	worker.setReadFunc(&DownloadManager::saveFile);
+	DownloadManagerCallbackContext ctx;
+	ctx.hFile = hFile;
+	ctx.this_ptr = (void*)this;
+	worker.setCtx((void*)&ctx);
+	worker.setReadFunc(&DownloadManager::CallBack);
 	worker.init();
 	worker.get(m_conFig.sUrl.c_str(), L"");
 	worker.wait();
@@ -154,6 +158,7 @@ void DownloadManager::cleanTmpFiles()
 	DeleteFileW((m_conFig.sDirPath + INFO_FILENAME).c_str());
 	RemoveDirectoryW(m_conFig.sDirPath.c_str());
 }
+
 
 void DownloadManager::queryOptions()
 {
@@ -225,7 +230,7 @@ void DownloadManager::downloadThread(int conn)
 {
 	// Utils::info(L"[+] Conn = %d\n", conn);
 	std::vector<AsynchronousWinHttp*> workers;
-	std::vector<HANDLE> files;
+	std::vector<DownloadManagerCallbackContext> files;
 	for (int i = 0; i < conn; ++i)
 	{
 		/*
@@ -238,10 +243,13 @@ void DownloadManager::downloadThread(int conn)
 		HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 			,GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		AsynchronousWinHttp* worker = new AsynchronousWinHttp;
+		DownloadManagerCallbackContext ctx;
+		ctx.hFile = hFile;
+		ctx.this_ptr = (void*)this;
 		workers.push_back(worker);
-		files.push_back(hFile);
-		worker->setCtx((void*)hFile);
-		worker->setReadFunc(DownloadManager::saveFile);
+		files.push_back(ctx);
+		worker->setCtx((void*)&ctx);
+		worker->setReadFunc(DownloadManager::CallBack);
 		worker->init();
 		worker->get(m_conFig.sUrl.c_str(), header);
 	}
@@ -259,7 +267,7 @@ void DownloadManager::downloadThread(int conn)
 				if (workers[i] && workers[i]->isClosed())
 				{
 					delete workers[i];
-					CloseHandle(files[i]);
+					CloseHandle(files[i].hFile);
 					Range range = this->m_pSegmentFactory->getNextSegment();
 					if (range.ord == MAXDWORD64) // ----------------->  this segment is not valid
 						continue;
@@ -268,9 +276,10 @@ void DownloadManager::downloadThread(int conn)
 						, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 					AsynchronousWinHttp* worker = new AsynchronousWinHttp;
 					workers[i] = worker;
-					files[i] = hFile;
-					worker->setCtx((void*)hFile);
-					worker->setReadFunc(DownloadManager::saveFile);
+					files[i].hFile = hFile;
+					files[i].this_ptr = (void*)this;
+					worker->setCtx((void*)&files[i]);
+					worker->setReadFunc(DownloadManager::CallBack);
 					worker->init();
 					worker->get(m_conFig.sUrl.c_str(), header);
 				}
@@ -285,7 +294,7 @@ void DownloadManager::downloadThread(int conn)
 	for (DWORD i = 0; i < workers.size(); ++i)
 	{
 		delete workers[i];
-		CloseHandle(files[i]);
+		CloseHandle(files[i].hFile);
 	}
 }
 
@@ -355,13 +364,16 @@ void DownloadManager::writeConfig()
 	CloseHandle(hFile);
 }
 
-void __stdcall DownloadManager::saveFile(void * lpCtx, LPBYTE lpData, DWORD nCount)
+void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCount)
 {
 	/*
 		Simple write...
 	*/
+	DownloadManagerCallbackContext* pCtx = (DownloadManagerCallbackContext*)lpCtx;
+	DownloadManager* pDM = (DownloadManager*)pCtx->this_ptr;
 	DWORD w = 0;
-	WriteFile((HANDLE)lpCtx, lpData, nCount, &w, NULL);
+	WriteFile(pCtx->hFile, lpData, nCount, &w, NULL);
+	pDM->m_qwDownloadedSize += (DWORD64)nCount;
 }
 
 
@@ -416,17 +428,19 @@ Range DownloadManager::SegmentFactory::getNextSegment()
 	return range;
 }
 
-void DownloadManager::SegmentFactory::repair()
+DWORD64 DownloadManager::SegmentFactory::repair()
 {
 	/*
 		Until now, we know that the server supports resuming.
+		Return number of bytes that have been successfully downloaded
 	*/
+	DWORD64 qwDownloadedSize = 0uLL;
 	std::wstring sTmp = m_sDirPath + INFO_FILENAME;
 	m_hFile = CreateFileW(sTmp.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (m_hFile == INVALID_HANDLE_VALUE)
 	{
 		Utils::info(L"[+] Can't repair, last error = %d\n", GetLastError());
-		return;
+		return 0uLL;
 	}
 	DWORD nr;
 	BOOL bSuccess;
@@ -452,6 +466,7 @@ void DownloadManager::SegmentFactory::repair()
 				goto save; // Segment doesn't have full size -> Redownload
 			else
 			{
+				qwDownloadedSize += dwFileSize;
 				CloseHandle(hFile);
 				continue;
 			}
@@ -468,6 +483,7 @@ void DownloadManager::SegmentFactory::repair()
 		if (hFile)
 			CloseHandle(hFile);
 	}
+	return qwDownloadedSize;
 }
 
 void DownloadManager::SegmentFactory::writeInfo()
