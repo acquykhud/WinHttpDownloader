@@ -230,7 +230,7 @@ void DownloadManager::downloadThread(int conn)
 {
 	// Utils::info(L"[+] Conn = %d\n", conn);
 	std::vector<AsynchronousWinHttp*> workers;
-	std::vector<DownloadManagerCallbackContext> files;
+	std::vector<DownloadManagerCallbackContext*> files;
 	for (int i = 0; i < conn; ++i)
 	{
 		/*
@@ -243,12 +243,12 @@ void DownloadManager::downloadThread(int conn)
 		HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
 			,GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		AsynchronousWinHttp* worker = new AsynchronousWinHttp;
-		DownloadManagerCallbackContext ctx;
-		ctx.hFile = hFile;
-		ctx.this_ptr = (void*)this;
+		DownloadManagerCallbackContext* pCtx = new DownloadManagerCallbackContext;
+		pCtx->hFile = hFile;
+		pCtx->this_ptr = (void*)this;
 		workers.push_back(worker);
-		files.push_back(ctx);
-		worker->setCtx((void*)&ctx);
+		files.push_back(pCtx);
+		worker->setCtx((void*)pCtx);
 		worker->setReadFunc(DownloadManager::CallBack);
 		worker->init();
 		worker->get(m_conFig.sUrl.c_str(), header);
@@ -267,7 +267,7 @@ void DownloadManager::downloadThread(int conn)
 				if (workers[i] && workers[i]->isClosed())
 				{
 					delete workers[i];
-					CloseHandle(files[i].hFile);
+					CloseHandle(files[i]->hFile);
 					Range range = this->m_pSegmentFactory->getNextSegment();
 					if (range.ord == MAXDWORD64) // ----------------->  this segment is not valid
 						continue;
@@ -276,9 +276,9 @@ void DownloadManager::downloadThread(int conn)
 						, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 					AsynchronousWinHttp* worker = new AsynchronousWinHttp;
 					workers[i] = worker;
-					files[i].hFile = hFile;
-					files[i].this_ptr = (void*)this;
-					worker->setCtx((void*)&files[i]);
+					files[i]->hFile = hFile;
+					files[i]->this_ptr = (void*)this;
+					worker->setCtx((void*)files[i]);
 					worker->setReadFunc(DownloadManager::CallBack);
 					worker->init();
 					worker->get(m_conFig.sUrl.c_str(), header);
@@ -294,7 +294,8 @@ void DownloadManager::downloadThread(int conn)
 	for (DWORD i = 0; i < workers.size(); ++i)
 	{
 		delete workers[i];
-		CloseHandle(files[i].hFile);
+		CloseHandle(files[i]->hFile);
+		delete files[i];
 	}
 }
 
@@ -372,8 +373,11 @@ void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCou
 	DownloadManagerCallbackContext* pCtx = (DownloadManagerCallbackContext*)lpCtx;
 	DownloadManager* pDM = (DownloadManager*)pCtx->this_ptr;
 	DWORD w = 0;
-	WriteFile(pCtx->hFile, lpData, nCount, &w, NULL);
+
+	if (!WriteFile(pCtx->hFile, lpData, nCount, &w, NULL))
+		Utils::info(L"[+] %d\n", GetLastError());
 	pDM->m_qwDownloadedSize += (DWORD64)nCount;
+	//Utils::info(L"[+] %lld\n", pDM->m_qwDownloadedSize);
 }
 
 
