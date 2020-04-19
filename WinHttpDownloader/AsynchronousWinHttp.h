@@ -1,4 +1,6 @@
-#pragma once
+#ifndef ASYNCHRONOUSWINHTTP_H
+#define ASYNCHRONOUSWINHTTP_H
+
 #include <Windows.h>
 #include <winhttp.h>
 #include <stdio.h>
@@ -65,3 +67,5 @@ private:
 protected:
 	static void __stdcall WinhttpStatusCallback(IN HINTERNET hInternet, IN DWORD_PTR dwContext, IN DWORD dwInternetStatus, IN LPVOID lpvStatusInformation, IN DWORD dwStatusInformationLength);
 };
+
+#endif

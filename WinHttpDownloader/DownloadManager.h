@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DOWNLOADMANAGER_H
+#define DOWNLOADMANAGER_H
 
 #define SEGMENT_SIZE (1048576uLL) // 1MB
 
@@ -96,3 +97,5 @@ private:
 protected:
 	static void __stdcall saveFile(void* lpCtx, LPBYTE lpData, DWORD nCount);
 };
+
+#endif
