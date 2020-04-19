@@ -12,6 +12,10 @@ AsynchronousWinHttp::AsynchronousWinHttp()
 
 AsynchronousWinHttp::~AsynchronousWinHttp()
 {
+	/*
+		Close connection.
+		Deallocate dynamic-allocated memory.
+	*/
 	close(); // In case user forgets to close
 	if (m_lpInternalBuffer)
 	{
@@ -22,12 +26,18 @@ AsynchronousWinHttp::~AsynchronousWinHttp()
 
 bool AsynchronousWinHttp::init()
 {
+	/*
+		Open new session.
+	*/
 	m_hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.113 Safari/537.36", 0, 0, 0, WINHTTP_FLAG_ASYNC); // TODO: agent
 	return m_hSession != NULL;
 }
 
 void AsynchronousWinHttp::close()
 {
+	/*
+		Close all HINTERNET handle.
+	*/
 	if (m_bIsClosed == TRUE)
 	{
 		return;
@@ -57,6 +67,9 @@ void AsynchronousWinHttp::close()
 
 bool AsynchronousWinHttp::get(LPCWSTR szUrl, const std::wstring& sHeader)
 {
+	/*
+		Send get request, headers=headers.
+	*/
 	WCHAR szHost[256];
 	URL_COMPONENTS urlComp;
 	ZeroMemory(&urlComp, sizeof(urlComp));
@@ -104,6 +117,9 @@ bool AsynchronousWinHttp::get(LPCWSTR szUrl, const std::wstring& sHeader)
 
 bool AsynchronousWinHttp::wait()
 {
+	/*
+		Synchronorous function wait.
+	*/
 	std::unique_lock<std::mutex> uLock(m_mutex); // lock 
 	m_con.wait(uLock, [this] 
 	{
@@ -114,6 +130,9 @@ bool AsynchronousWinHttp::wait()
 
 std::wstring AsynchronousWinHttp::getRawHeader() const
 {
+	/*
+		Get response header.
+	*/
 	if (m_bHeaderReady)
 		return m_sHeader;
 	return std::wstring(L"");
@@ -121,6 +140,9 @@ std::wstring AsynchronousWinHttp::getRawHeader() const
 
 bool AsynchronousWinHttp::getHeader()
 {
+	/*
+		Get response header.
+	*/
 	DWORD dwSize = 0;
 	if (!WinHttpQueryHeaders(m_hRequest, WINHTTP_QUERY_RAW_HEADERS_CRLF, 0, NULL, &dwSize, NULL))
 	{
@@ -170,6 +192,9 @@ bool AsynchronousWinHttp::getHeader()
 
 bool AsynchronousWinHttp::isDataAvail()
 {
+	/*
+		Check if we can read data now.
+	*/
 	if (!WinHttpQueryDataAvailable(m_hRequest, NULL))
 	{
 		// TODO: cleanup
@@ -180,6 +205,9 @@ bool AsynchronousWinHttp::isDataAvail()
 
 void AsynchronousWinHttp::update()
 {
+	/*
+		Update progress.
+	*/
 	if (m_qwRemoteFileSize == 0) // percentage update: warning: divide by zero
 	{
 		return;
@@ -200,6 +228,9 @@ void AsynchronousWinHttp::update()
 
 void AsynchronousWinHttp::readBufferedData(DWORD size)
 {
+	/*
+		Request to read data.
+	*/
 	if (!size)
 		return;
 	WinHttpReadData(m_hRequest, m_lpInternalBuffer, size, NULL);
@@ -207,6 +238,9 @@ void AsynchronousWinHttp::readBufferedData(DWORD size)
 
 BOOL AsynchronousWinHttp::getRemoteSize(DWORD64* lpDwSizeOut) const
 {
+	/*
+		Get file size.
+	*/
 	if (m_bHeaderReady)
 	{
 		*lpDwSizeOut = m_qwRemoteFileSize;
@@ -217,6 +251,9 @@ BOOL AsynchronousWinHttp::getRemoteSize(DWORD64* lpDwSizeOut) const
 
 BOOL AsynchronousWinHttp::checkIfSupportResuming(LPBOOL lpBOut) const
 {
+	/*
+		Check if server support resuming.
+	*/
 	if (m_bHeaderReady)
 	{
 		*lpBOut = m_bSupportResuming;
@@ -227,6 +264,11 @@ BOOL AsynchronousWinHttp::checkIfSupportResuming(LPBOOL lpBOut) const
 
 void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet, IN DWORD_PTR dwContext, IN DWORD dwInternetStatus, IN LPVOID lpvStatusInformation, IN DWORD dwStatusInformationLength)
 {
+	/*
+		Callback function.
+		The heart of this program is here :)
+
+	*/
 	AsynchronousWinHttp* lpCtx = (AsynchronousWinHttp*)dwContext;
 	WINHTTP_ASYNC_RESULT* pWAR = (WINHTTP_ASYNC_RESULT*)lpvStatusInformation;
 	switch (dwInternetStatus)

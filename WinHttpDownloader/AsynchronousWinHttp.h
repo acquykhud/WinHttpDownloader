@@ -27,8 +27,8 @@ public:
 	void readBufferedData(DWORD size);
 	void setName(const std::wstring& name) { m_sName = name; }
 	
-	void setReadFunc(void(__stdcall *fn)(void* ctx, LPBYTE, DWORD)) { this->m_fnReadFunc = fn; }
-	void setCtx(void* ctx) { this->m_ctx = ctx; }
+	void setReadFunc(void(__stdcall *fn)(void* ctx, LPBYTE, DWORD)) { this->m_fnReadFunc = fn; } // User-defined function to process data.
+	void setCtx(void* ctx) { this->m_ctx = ctx; }												 // User-defined variable use to pass to "fn" (this->m_fnReadFunc(this-m_ctx, ...))
 
 	std::wstring getRawHeader() const;					   // for debugging only
 	BOOL getRemoteSize(DWORD64* lpQwSizeOut) const;		   // for debugging only
