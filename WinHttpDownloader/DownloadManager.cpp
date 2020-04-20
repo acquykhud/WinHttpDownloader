@@ -567,17 +567,25 @@ bool DownloadManager::FileMerger::validate() const
 		}
 		else
 		{
-			DWORD dwFileSize = GetFileSize(hFile, NULL);
+			DWORD dwFileSizeLow, dwFileSizeHigh;
+			DWORD64 qwFileSize;
+			dwFileSizeLow = GetFileSize(hFile, &dwFileSizeHigh);
+			qwFileSize = dwFileSizeLow | ((DWORD64)dwFileSizeHigh << 32);
 			CloseHandle(hFile);
-			DWORD dwCompare;
+			DWORD64 qwCompare;
 			if (i != m_qwTotalSegment - 1)
-				dwCompare = (DWORD)qwSegmentSize;
+				qwCompare = qwSegmentSize;
 			else // Last segment
-				dwCompare = (m_qwTotalFileSize - 1) % qwSegmentSize + 1;
-			if (dwFileSize != dwCompare)
+			{
+				if (m_qwTotalSegment == 1uLL)
+					qwCompare = m_qwTotalFileSize; // Singlethreaded mode.
+				else
+					qwCompare = (m_qwTotalFileSize - 1) % qwSegmentSize + 1;
+			}
+			if (qwFileSize != qwCompare)
 			{
 				Utils::info(L"[+] File %lld corrupted, please redownload\n", i);
-				Utils::info(L"[+] dwFileSize: %d, dwCompare: %d\n", dwFileSize, dwCompare);
+				Utils::info(L"[+] qwFileSize: %lld, qwCompare: %lld\n", qwFileSize, qwCompare);
 				bRet = false;
 				break;
 			}
