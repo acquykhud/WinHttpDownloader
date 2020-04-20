@@ -61,15 +61,19 @@ private:
 	class FileMerger
 	{
 	public:
-		FileMerger(const Config& config, DWORD64 qwMaxSegmentCount)
-			:m_sFullPath(config.sFullPath), m_sDirPath(config.sDirPath), m_qwTotalSegment(qwMaxSegmentCount) {}
+		static const DWORD64 qwSegmentSize = SEGMENT_SIZE;
+		FileMerger(const Config& config, DWORD64 qwMaxSegmentCount, DWORD64 qwTotalFileSize)
+			:m_sFullPath(config.sFullPath), m_sDirPath(config.sDirPath), m_qwTotalSegment(qwMaxSegmentCount), m_qwTotalFileSize(qwTotalFileSize) {}
 		~FileMerger() {}
-		void start();
+		void start(); // validate and merge
 	private:
 		DWORD64 m_qwTotalSegment; // how many segments we need to merge ?
+		DWORD64 m_qwTotalFileSize;
 		std::wstring m_sFullPath;
 		std::wstring m_sDirPath;
 		std::wstring m_sFileName;
+		bool validate() const;
+		void merge();
 	};
 	struct DownloadManagerCallbackContext
 	{

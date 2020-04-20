@@ -4,7 +4,7 @@ int main(int argc, char* argv[])
 {
 	// https://tb.rg-adguard.net/dl.php?go=349c795e
 	DownloadManager dm(
-		L"http://flare-on.com/files/Flare-On6_Challenges.zip",
+		L"http://ipv4.download.thinkbroadband.com/50MB.zip",
 		L"C:\\Users\\xikhud\\Desktop\\Out\\LastFile.zip",
 		3, // thread
 		6); // conn
@@ -16,8 +16,8 @@ int main(int argc, char* argv[])
 	auto start = std::chrono::high_resolution_clock::now();
 	dm.start();
 	auto end = std::chrono::high_resolution_clock::now();
-	auto second = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-	Utils::info(L"[+] Milliseconds: %lld\n", second);
+	auto second = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
+	Utils::info(L"[+] Download time: %lld seconds\n", second);
 	Utils::info(L"[+] Merging...\n");
 	dm.merge();
 	return 0;

@@ -145,7 +145,7 @@ void DownloadManager::merge()
 		Merge temp files.
 		And remove them.
 	*/
-	FileMerger fm(m_conFig, m_pSegmentFactory->getMaxSegmentCount());
+	FileMerger fm(m_conFig, m_pSegmentFactory->getMaxSegmentCount(), m_qwDownloadedSize);
 	fm.start();
 }
 
@@ -544,13 +544,62 @@ void DownloadManager::SegmentFactory::closeFile()
 
 void DownloadManager::FileMerger::start()
 {
+	if (validate())
+	{
+		Utils::info(L"[+] Validated all files, start merging now\n");
+		merge();
+	}
+	else
+		Utils::info(L"[+] Missing some parts, please redownload\n");
+}
+
+bool DownloadManager::FileMerger::validate() const
+{
+	bool bRet = true;
+	if (m_qwTotalSegment == 0uLL || m_qwTotalSegment == MAXDWORD64)
+	{
+		Utils::info(L"[+] Validate: Semgent count invalid\n");
+		return false;
+	}
+	for (DWORD64 i = 0uLL; i < m_qwTotalSegment; ++i)
+	{
+		std::wstring sTmp = m_sDirPath + std::to_wstring(i);
+		HANDLE hFile = CreateFileW(sTmp.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFile == INVALID_HANDLE_VALUE)
+		{
+			Utils::info(L"[+] Missing file %lld, please redownload\n", i);
+			bRet = false;
+			break;
+		}
+		else
+		{
+			DWORD dwFileSize = GetFileSize(hFile, NULL);
+			CloseHandle(hFile);
+			DWORD dwCompare;
+			if (i != m_qwTotalSegment - 1)
+				dwCompare = (DWORD)qwSegmentSize;
+			else // Last segment
+				dwCompare = m_qwTotalFileSize % qwSegmentSize;
+			if (dwFileSize != dwCompare)
+			{
+				Utils::info(L"[+] File %lld corrupted, please redownload\n", i);
+				bRet = false;
+				break;
+			}
+		}
+	}
+	return bRet;
+}
+
+void DownloadManager::FileMerger::merge()
+{
 	/*
 		Start merging files.
 	*/
 	BYTE buffer[4096];
 	if (m_qwTotalSegment == 0uLL || m_qwTotalSegment == MAXDWORD64)
 	{
-		Utils::info(L"[+] Semgent count invalid\n");
+		Utils::info(L"[+] Merge: Semgent count invalid\n");
 		return;
 	}
 	std::wstring sFullPath = m_sFullPath;
@@ -566,7 +615,7 @@ void DownloadManager::FileMerger::start()
 		HANDLE hTmpFile = CreateFileW(sTmp.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (hTmpFile == INVALID_HANDLE_VALUE)
 		{
-			Utils::info(L"[+] Missing %d, exiting ..., last error = %d\n", i, GetLastError());
+			Utils::info(L"[+] Missing %lld, exiting ..., last error = %d\n", i, GetLastError());
 			break;
 		}
 		DWORD dwFileSizeLow, dwFileSizeHigh;
