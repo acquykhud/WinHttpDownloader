@@ -1,7 +1,7 @@
 #ifndef DOWNLOADMANAGER_H
 #define DOWNLOADMANAGER_H
 
-#define SEGMENT_SIZE (1048576uLL * 4uLL) // 1MB
+#define SEGMENT_SIZE (1048576uLL * 1uLL) // 1MB
 
 #include "AsynchronousWinHttp.h"
 #include "ProgressBar.h"

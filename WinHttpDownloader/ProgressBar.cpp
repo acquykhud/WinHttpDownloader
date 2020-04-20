@@ -1,10 +1,10 @@
 #include "ProgressBar.h"
 
+#pragma region ProgressBar
 void ProgressBar::setTotal(DWORD64 qwTotal)
 {
 	m_qwTotal = qwTotal;
 }
-
 void ProgressBar::update(DWORD64 qwCurrent)
 {
 	/*
@@ -39,3 +39,4 @@ void ProgressBar::update(DWORD64 qwCurrent)
 		Utils::info(L"%c", L'\r');
 	}
 }
+#pragma endregion

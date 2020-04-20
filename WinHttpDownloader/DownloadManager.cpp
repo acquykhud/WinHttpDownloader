@@ -9,6 +9,7 @@
 								std::to_wstring(end) + \
 								L"\r\n";
 
+#pragma region DownloadManager
 DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& sFullPath, DWORD nThread, DWORD nConn)
 {
 	/*
@@ -25,6 +26,7 @@ DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& s
 	if (m_conFig.bReady && m_conFig.bResume)
 	{
 		m_qwDownloadedSize = m_pSegmentFactory->repair();
+		Utils::info(L"[+] Repair size: %lld\n", m_qwDownloadedSize);
 	}
 	else if (m_conFig.bReady /*&& m_conFig.bResume == FALSE */)
 	{
@@ -32,7 +34,6 @@ DownloadManager::DownloadManager(const std::wstring & url, const std::wstring& s
 	}
 	m_progressBar.setTotal(m_qwRemoteFileSize);
 }
-
 DownloadManager::~DownloadManager()
 {
 	/*
@@ -46,17 +47,14 @@ DownloadManager::~DownloadManager()
 	}
 	cleanTmpFiles();
 }
-
 DWORD64 DownloadManager::getFileSize() const
 {
 	return m_qwRemoteFileSize;
 }
-
 BOOL DownloadManager::supportResuming() const
 {
 	return m_bSupportResuming;
 }
-
 void DownloadManager::start()
 {
 	/*
@@ -89,7 +87,6 @@ void DownloadManager::start()
 		startMultithreadedDownloadMode();
 	}
 }
-
 void DownloadManager::startMultithreadedDownloadMode()
 {
 	/*
@@ -113,7 +110,6 @@ void DownloadManager::startMultithreadedDownloadMode()
 		m_threads[i].join();
 	}
 }
-
 void DownloadManager::startSinglethreadedDownloadMode()
 {
 	/*
@@ -138,17 +134,16 @@ void DownloadManager::startSinglethreadedDownloadMode()
 	worker.wait();
 	CloseHandle(hFile);
 }
-
 void DownloadManager::merge()
 {
 	/*
 		Merge temp files.
 		And remove them.
 	*/
+	Utils::info(L"[+] Total downloaded: %lld\n", m_qwDownloadedSize);
 	FileMerger fm(m_conFig, m_pSegmentFactory->getMaxSegmentCount(), m_qwDownloadedSize);
 	fm.start();
 }
-
 void DownloadManager::cleanTmpFiles()
 {
 	/*
@@ -159,8 +154,6 @@ void DownloadManager::cleanTmpFiles()
 	DeleteFileW((m_conFig.sDirPath + INFO_FILENAME).c_str());
 	RemoveDirectoryW(m_conFig.sDirPath.c_str());
 }
-
-
 void DownloadManager::queryOptions()
 {
 	/*
@@ -226,7 +219,6 @@ clean:
 
 	return;
 }
-
 void DownloadManager::downloadThread(int conn)
 {
 	// Utils::info(L"[+] Conn = %d\n", conn);
@@ -242,7 +234,7 @@ void DownloadManager::downloadThread(int conn)
 			continue;
 		std::wstring header = MAKE_RANGE_HEADER(range.start, range.end);
 		HANDLE hFile = CreateFileW((m_conFig.sDirPath + std::to_wstring(range.ord)).c_str()
-			,GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		AsynchronousWinHttp* worker = new AsynchronousWinHttp;
 		DownloadManagerCallbackContext* pCtx = new DownloadManagerCallbackContext;
 		pCtx->hFile = hFile;
@@ -268,6 +260,7 @@ void DownloadManager::downloadThread(int conn)
 				if (workers[i] && workers[i]->isClosed())
 				{
 					delete workers[i];
+					workers[i] = NULL;
 					CloseHandle(files[i]->hFile);
 					Range range = this->m_pSegmentFactory->getNextSegment();
 					if (range.ord == MAXDWORD64) // ----------------->  this segment is not valid
@@ -290,7 +283,8 @@ void DownloadManager::downloadThread(int conn)
 	}
 	for (DWORD i = 0; i < workers.size(); ++i)
 	{
-		workers[i]->wait();
+		if (workers[i] && !workers[i]->isClosed())
+			workers[i]->wait();
 	}
 	for (DWORD i = 0; i < workers.size(); ++i)
 	{
@@ -299,11 +293,10 @@ void DownloadManager::downloadThread(int conn)
 		delete files[i];
 	}
 }
-
 void DownloadManager::updateConfig()
 {
 	/*
-		This function, separate FullPath into filename and directory. 
+		This function, separate FullPath into filename and directory.
 		Calculate SHA256, and determine what to do.
 	*/
 	m_conFig.bReady = FALSE;
@@ -321,7 +314,7 @@ void DownloadManager::updateConfig()
 	Utils::info(L"[+] Unique hash value: \"%s\"\n", m_conFig.sSHA256.c_str());
 
 	m_conFig.sDirPath = Utils::getTempPath() + WINHTTPDOWNLOADER_FILENAME + L'\\' + m_conFig.sSHA256 + L'\\';
-	
+
 	std::wstring sPath = Utils::getTempPath() + WINHTTPDOWNLOADER_FILENAME + L'\\';
 	CreateDirectoryW(sPath.c_str(), NULL); // Don't care
 	sPath = m_conFig.sDirPath;
@@ -345,9 +338,8 @@ void DownloadManager::updateConfig()
 		}
 	}
 	Utils::info(L"[+] Resuming: %s\n", m_conFig.bResume ? L"TRUE" : L"FALSE");
-	m_conFig.bReady = TRUE; 
+	m_conFig.bReady = TRUE;
 }
-
 void DownloadManager::writeConfig()
 {
 	/*
@@ -365,7 +357,9 @@ void DownloadManager::writeConfig()
 	WriteFile(hFile, &bResumeable, sizeof(bResumeable), &nw, NULL);
 	CloseHandle(hFile);
 }
+#pragma endregion
 
+#pragma region DownloadManagerCallBackFunction
 void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCount)
 {
 	/*
@@ -381,8 +375,9 @@ void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCou
 	pDM->m_progressBar.update(pDM->m_qwDownloadedSize);
 	//Utils::info(L"[+] %lld\n", pDM->m_qwDownloadedSize);
 }
+#pragma endregion
 
-
+#pragma region SegmentFactory
 DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize, const Config & config)
 {
 	/*
@@ -397,7 +392,6 @@ DownloadManager::SegmentFactory::SegmentFactory(DWORD64 qwFileSize, const Config
 		m_qwMaxSegmentCount = 1; // ?
 	m_qwSegmentCount = 0uLL;
 }
-
 DownloadManager::SegmentFactory::~SegmentFactory()
 {
 	/*
@@ -405,7 +399,6 @@ DownloadManager::SegmentFactory::~SegmentFactory()
 	*/
 	closeFile();
 }
-
 Range DownloadManager::SegmentFactory::getNextSegment()
 {
 	/*
@@ -425,7 +418,9 @@ Range DownloadManager::SegmentFactory::getNextSegment()
 	if (m_qwSegmentCount != m_qwMaxSegmentCount - 1)
 		range.end = range.start + (qwSegmentSize - 1);
 	else
-		range.end = range.start + (m_qwFileSize % qwSegmentSize) - 1;
+		range.end = range.start + ((m_qwFileSize - 1) % qwSegmentSize);
+
+
 	m_qwSegmentCount += 1uLL;
 	updateLastestSegment(m_qwSegmentCount);
 	if (m_qwSegmentCount > m_qwMaxSegmentCount)
@@ -433,7 +428,6 @@ Range DownloadManager::SegmentFactory::getNextSegment()
 
 	return range;
 }
-
 DWORD64 DownloadManager::SegmentFactory::repair()
 {
 	/*
@@ -472,7 +466,7 @@ DWORD64 DownloadManager::SegmentFactory::repair()
 				goto save; // Segment doesn't have full size -> Redownload
 			else
 			{
-				qwDownloadedSize += dwFileSize;
+				qwDownloadedSize += (DWORD64)dwFileSize;
 				CloseHandle(hFile);
 				continue;
 			}
@@ -491,7 +485,6 @@ DWORD64 DownloadManager::SegmentFactory::repair()
 	}
 	return qwDownloadedSize;
 }
-
 void DownloadManager::SegmentFactory::writeInfo()
 {
 	/*
@@ -515,7 +508,6 @@ void DownloadManager::SegmentFactory::writeInfo()
 	WriteFile(m_hFile, &m_qwMaxSegmentCount, sizeof(m_qwMaxSegmentCount), &nw, NULL);
 	WriteFile(m_hFile, &m_qwFileSize, sizeof(m_qwFileSize), &nw, NULL);
 }
-
 void DownloadManager::SegmentFactory::updateLastestSegment(DWORD64 idx)
 {
 	/*
@@ -528,7 +520,6 @@ void DownloadManager::SegmentFactory::updateLastestSegment(DWORD64 idx)
 		WriteFile(m_hFile, &idx, sizeof(idx), &nw, NULL);
 	}
 }
-
 void DownloadManager::SegmentFactory::closeFile()
 {
 	/*
@@ -541,7 +532,9 @@ void DownloadManager::SegmentFactory::closeFile()
 		m_hFile = NULL;
 	}
 }
+#pragma endregion
 
+#pragma region FileMerger
 void DownloadManager::FileMerger::start()
 {
 	if (validate())
@@ -552,7 +545,6 @@ void DownloadManager::FileMerger::start()
 	else
 		Utils::info(L"[+] Missing some parts, please redownload\n");
 }
-
 bool DownloadManager::FileMerger::validate() const
 {
 	bool bRet = true;
@@ -579,7 +571,9 @@ bool DownloadManager::FileMerger::validate() const
 			if (i != m_qwTotalSegment - 1)
 				dwCompare = (DWORD)qwSegmentSize;
 			else // Last segment
-				dwCompare = m_qwTotalFileSize % qwSegmentSize;
+			{
+				dwCompare = (m_qwTotalFileSize - 1) % qwSegmentSize + 1;
+			}
 			if (dwFileSize != dwCompare)
 			{
 				Utils::info(L"[+] File %lld corrupted, please redownload\n", i);
@@ -590,7 +584,6 @@ bool DownloadManager::FileMerger::validate() const
 	}
 	return bRet;
 }
-
 void DownloadManager::FileMerger::merge()
 {
 	/*
@@ -636,3 +629,4 @@ void DownloadManager::FileMerger::merge()
 	}
 	CloseHandle(hFile);
 }
+#pragma endregion

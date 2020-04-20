@@ -1,5 +1,6 @@
 #include "AsynchronousWinHttp.h"
 
+#pragma region AsynchronousWinHttp
 AsynchronousWinHttp::AsynchronousWinHttp()
 {
 	m_qwByteReadCount = 0;
@@ -9,7 +10,6 @@ AsynchronousWinHttp::AsynchronousWinHttp()
 	m_fnReadFunc = NULL;
 	m_ctx = NULL;
 }
-
 AsynchronousWinHttp::~AsynchronousWinHttp()
 {
 	/*
@@ -23,7 +23,6 @@ AsynchronousWinHttp::~AsynchronousWinHttp()
 		m_lpInternalBuffer = NULL;
 	}
 }
-
 bool AsynchronousWinHttp::init()
 {
 	/*
@@ -32,7 +31,6 @@ bool AsynchronousWinHttp::init()
 	m_hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.113 Safari/537.36", 0, 0, 0, WINHTTP_FLAG_ASYNC); // TODO: agent
 	return m_hSession != NULL;
 }
-
 void AsynchronousWinHttp::close()
 {
 	/*
@@ -64,7 +62,6 @@ void AsynchronousWinHttp::close()
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_con.notify_one();
 }
-
 bool AsynchronousWinHttp::get(LPCWSTR szUrl, const std::wstring& sHeader)
 {
 	/*
@@ -114,7 +111,6 @@ bool AsynchronousWinHttp::get(LPCWSTR szUrl, const std::wstring& sHeader)
 
 	return true;
 }
-
 bool AsynchronousWinHttp::wait()
 {
 	/*
@@ -127,7 +123,6 @@ bool AsynchronousWinHttp::wait()
 	});
 	return true;
 }
-
 std::wstring AsynchronousWinHttp::getRawHeader() const
 {
 	/*
@@ -137,7 +132,6 @@ std::wstring AsynchronousWinHttp::getRawHeader() const
 		return m_sHeader;
 	return std::wstring(L"");
 }
-
 bool AsynchronousWinHttp::getHeader()
 {
 	/*
@@ -189,7 +183,6 @@ bool AsynchronousWinHttp::getHeader()
 
 	return true;
 }
-
 bool AsynchronousWinHttp::isDataAvail()
 {
 	/*
@@ -202,7 +195,6 @@ bool AsynchronousWinHttp::isDataAvail()
 	}
 	return true;
 }
-
 void AsynchronousWinHttp::update()
 {
 	/*
@@ -225,7 +217,6 @@ void AsynchronousWinHttp::update()
 		lastByteReadCount = byteReadCount;
 	}
 }
-
 void AsynchronousWinHttp::readBufferedData(DWORD size)
 {
 	/*
@@ -235,7 +226,6 @@ void AsynchronousWinHttp::readBufferedData(DWORD size)
 		return;
 	WinHttpReadData(m_hRequest, m_lpInternalBuffer, size, NULL);
 }
-
 BOOL AsynchronousWinHttp::getRemoteSize(DWORD64* lpDwSizeOut) const
 {
 	/*
@@ -248,7 +238,6 @@ BOOL AsynchronousWinHttp::getRemoteSize(DWORD64* lpDwSizeOut) const
 	}
 	return FALSE;
 }
-
 BOOL AsynchronousWinHttp::checkIfSupportResuming(LPBOOL lpBOut) const
 {
 	/*
@@ -261,7 +250,6 @@ BOOL AsynchronousWinHttp::checkIfSupportResuming(LPBOOL lpBOut) const
 	}
 	return FALSE;
 }
-
 void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet, IN DWORD_PTR dwContext, IN DWORD dwInternetStatus, IN LPVOID lpvStatusInformation, IN DWORD dwStatusInformationLength)
 {
 	/*
@@ -355,3 +343,4 @@ void __stdcall AsynchronousWinHttp::WinhttpStatusCallback(IN HINTERNET hInternet
 		break;
 	}
 }
+#pragma endregion
