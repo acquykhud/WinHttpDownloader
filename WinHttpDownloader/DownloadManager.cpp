@@ -371,6 +371,8 @@ void __stdcall DownloadManager::CallBack(void * lpCtx, LPBYTE lpData, DWORD nCou
 
 	if (!WriteFile(pCtx->hFile, lpData, nCount, &w, NULL))
 		Utils::info(L"[+] %d\n", GetLastError());
+
+	std::lock_guard<std::mutex> lock(pDM->m_mutex);
 	pDM->m_qwDownloadedSize += (DWORD64)nCount;
 	pDM->m_progressBar.update(pDM->m_qwDownloadedSize);
 	//Utils::info(L"[+] %lld\n", pDM->m_qwDownloadedSize);
@@ -571,12 +573,11 @@ bool DownloadManager::FileMerger::validate() const
 			if (i != m_qwTotalSegment - 1)
 				dwCompare = (DWORD)qwSegmentSize;
 			else // Last segment
-			{
 				dwCompare = (m_qwTotalFileSize - 1) % qwSegmentSize + 1;
-			}
 			if (dwFileSize != dwCompare)
 			{
 				Utils::info(L"[+] File %lld corrupted, please redownload\n", i);
+				Utils::info(L"[+] dwFileSize: %d, dwCompare: %d\n", dwFileSize, dwCompare);
 				bRet = false;
 				break;
 			}
