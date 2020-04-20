@@ -22,7 +22,7 @@ std::wstring Utils::sha256_hexdigest(LPCBYTE lpData, DWORD dwLength)
 	std::wstring sRet = L"";
 	SHA256_CTX ctx;
 	sha256_init(&ctx);
-	sha256_update(&ctx, (const BYTE*)"abc", 3);
+	sha256_update(&ctx, lpData, dwLength);
 	sha256_final(&ctx, buf);
 	for (int i = 0; i < sizeof(buf); ++i)
 		sRet += hex_a2b(buf[i]);
