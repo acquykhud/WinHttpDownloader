@@ -478,7 +478,7 @@ DWORD64 DownloadManager::SegmentFactory::repair()
 		if (i != m_qwMaxSegmentCount - 1)
 			range.end = range.start + (qwSegmentSize - 1);
 		else
-			range.end = range.start + (m_qwFileSize % qwSegmentSize) - 1;
+			range.end = range.start + ((m_qwFileSize - 1) % qwSegmentSize);
 		m_uncompletedSegments.push_back(range);
 		if (hFile)
 			CloseHandle(hFile);
